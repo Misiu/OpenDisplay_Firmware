@@ -13,7 +13,7 @@ To quickly get started, visit the following resources:
 ## Community
 
 Join the Open Display community on Discord for help, discussions, and development updates:  
-[Open Display Discord Server](https://discord.gg/XmTHz8RfJE)
+[Open Display Discord Server](https://discord.gg/wgQ8XsgMkv)
 
 ## Supported Hardware
 
