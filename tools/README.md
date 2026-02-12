@@ -63,6 +63,10 @@ pip install adafruit-nrfutil
 ## Quick Start
 
 ```bash
+# Check current bootloader version first
+python tools/update_bootloader.py --version
+
+# Update the bootloader
 python tools/update_bootloader.py
 ```
 
@@ -78,6 +82,9 @@ The tool will:
 ## Usage
 
 ```bash
+# Read the current bootloader version (safe, read-only)
+python tools/update_bootloader.py --version
+
 # Auto-detect everything (interactive)
 python tools/update_bootloader.py
 
@@ -128,9 +135,14 @@ typically takes 20–60 seconds.
 ### Step 4: Verify
 
 After the update completes, press RESET once. The new bootloader will be
-running. You can verify the bootloader version through the serial console or
-by checking the `INFO_UF2.TXT` file on the BOOT drive (double-tap RESET to
-see it).
+running. Verify the update by reading the bootloader version:
+
+```bash
+python tools/update_bootloader.py --version
+```
+
+This reads `INFO_UF2.TXT` from the UF2 boot drive and compares with the
+latest release on GitHub.
 
 ## Manual Update (without this tool)
 

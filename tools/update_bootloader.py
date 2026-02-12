@@ -58,6 +58,9 @@ BOARD_LABELS = {
     "standard": "XIAO nRF52840",
 }
 
+# Common UF2 boot volume names for XIAO nRF52840 boards
+UF2_VOLUME_NAMES = ["XIAO-SENSE", "XIAO-NRF52", "NICENANO", "FEATHER", "FTHR840BOOT"]
+
 # adafruit-nrfutil binary names to try, in order of preference.
 # On Linux/macOS via pip: "adafruit-nrfutil"
 # On macOS standalone:    "adafruit-nrfutil-macos" or "./adafruit-nrfutil-macos"
@@ -411,6 +414,191 @@ def find_serial_ports():
 
 
 # ---------------------------------------------------------------------------
+# UF2 boot drive detection and version reading
+# ---------------------------------------------------------------------------
+
+def find_uf2_drive():
+    """Find the UF2 boot drive. Returns the path or None."""
+    system = platform.system()
+    candidates = []
+
+    if system == "Linux":
+        # Check common mount points
+        for base in ["/media", os.path.expanduser("~/media")]:
+            if os.path.isdir(base):
+                for user_dir in os.listdir(base):
+                    user_path = os.path.join(base, user_dir)
+                    if os.path.isdir(user_path):
+                        for name in os.listdir(user_path):
+                            candidates.append(os.path.join(user_path, name))
+        # Also check /mnt
+        if os.path.isdir("/mnt"):
+            for name in os.listdir("/mnt"):
+                candidates.append(os.path.join("/mnt", name))
+        # Also check /run/media (some distros)
+        if os.path.isdir("/run/media"):
+            for user_dir in os.listdir("/run/media"):
+                user_path = os.path.join("/run/media", user_dir)
+                if os.path.isdir(user_path):
+                    for name in os.listdir(user_path):
+                        candidates.append(os.path.join(user_path, name))
+
+    elif system == "Darwin":
+        if os.path.isdir("/Volumes"):
+            for name in os.listdir("/Volumes"):
+                candidates.append(os.path.join("/Volumes", name))
+
+    elif system == "Windows":
+        import string
+        for letter in string.ascii_uppercase:
+            drive = f"{letter}:\\"
+            if os.path.isdir(drive):
+                candidates.append(drive)
+
+    # Check each candidate for INFO_UF2.TXT (definitive UF2 bootloader marker)
+    for path in candidates:
+        info_path = os.path.join(path, "INFO_UF2.TXT")
+        if os.path.isfile(info_path):
+            return path
+
+    # Fallback: check volume names (must have INFO_UF2.TXT or known boot-drive name)
+    for path in candidates:
+        vol_name = os.path.basename(path).upper()
+        for known in UF2_VOLUME_NAMES:
+            if known == vol_name:
+                return path
+
+    return None
+
+
+def read_bootloader_version(drive_path):
+    """Read and parse INFO_UF2.TXT from a UF2 boot drive.
+
+    Returns a dict with parsed fields, or None if the file is not found.
+    Example INFO_UF2.TXT content:
+        UF2 Bootloader 0.6.2 lib/nrfx (v2.0.0) ...
+        Model: Seeed XIAO nRF52840 Sense
+        Board-ID: Seeed_XIAO_nRF52840_Sense
+        SoftDevice: S140 7.3.0
+    """
+    info_path = os.path.join(drive_path, "INFO_UF2.TXT")
+    if not os.path.isfile(info_path):
+        return None
+
+    info = {"raw": "", "bootloader_version": None, "model": None,
+            "board_id": None, "softdevice": None}
+
+    try:
+        with open(info_path, "r", encoding="utf-8", errors="replace") as f:
+            info["raw"] = f.read().strip()
+    except OSError:
+        return None
+
+    for line in info["raw"].splitlines():
+        line = line.strip()
+        if line.startswith("UF2 Bootloader"):
+            # e.g., "UF2 Bootloader 0.6.2 lib/nrfx ..."
+            parts = line.split()
+            if len(parts) >= 3:
+                info["bootloader_version"] = parts[2]
+        elif line.startswith("Model:"):
+            info["model"] = line.split(":", 1)[1].strip()
+        elif line.startswith("Board-ID:"):
+            info["board_id"] = line.split(":", 1)[1].strip()
+        elif line.startswith("SoftDevice:"):
+            info["softdevice"] = line.split(":", 1)[1].strip()
+
+    return info
+
+
+def do_read_version():
+    """Read and display the current bootloader version from the UF2 boot drive."""
+    print()
+    print("=" * 70)
+    print("  Read Current Bootloader Version")
+    print("=" * 70)
+    print()
+    print("  This reads the bootloader version from the INFO_UF2.TXT file")
+    print("  on the UF2 boot drive. The board must be in bootloader mode.")
+    print()
+    print("  Connect the board via USB, then double-tap the RESET button.")
+    print("  A USB drive ending in 'BOOT' should appear.")
+    print()
+    input("  Press Enter when the board is in bootloader mode (or Ctrl+C to cancel)...")
+    print()
+
+    drive = find_uf2_drive()
+    if not drive:
+        print("  ERROR: No UF2 boot drive found.")
+        print()
+        print("  Make sure the board is in bootloader mode:")
+        print("    1. Connect via USB")
+        print("    2. Double-tap the RESET button")
+        print("    3. A USB drive (e.g., XIAO-SENSE) should appear")
+        print()
+        system = platform.system()
+        if system == "Linux":
+            print("  The drive may not auto-mount on Linux.")
+            print("  Check: lsblk or mount the device manually.")
+        elif system == "Windows":
+            print("  Check File Explorer for a new removable drive.")
+        elif system == "Darwin":
+            print("  Check /Volumes/ for a new drive.")
+        sys.exit(1)
+
+    print(f"  Found UF2 boot drive: {drive}")
+
+    info = read_bootloader_version(drive)
+    if not info:
+        print(f"  ERROR: Could not read INFO_UF2.TXT from {drive}")
+        sys.exit(1)
+
+    print()
+    print("  " + "-" * 50)
+    print("  Current Bootloader Info")
+    print("  " + "-" * 50)
+    if info["bootloader_version"]:
+        print(f"  Bootloader version : {info['bootloader_version']}")
+    if info["model"]:
+        print(f"  Board model        : {info['model']}")
+    if info["board_id"]:
+        print(f"  Board ID           : {info['board_id']}")
+    if info["softdevice"]:
+        print(f"  SoftDevice         : {info['softdevice']}")
+    print("  " + "-" * 50)
+    print()
+    print(f"  Raw INFO_UF2.TXT contents:")
+    for line in info["raw"].splitlines():
+        print(f"    {line}")
+    print()
+
+    # Fetch latest version from GitHub for comparison
+    try:
+        import requests
+        headers = {"Accept": "application/vnd.github+json"}
+        github_token = os.environ.get("GITHUB_TOKEN")
+        if github_token:
+            headers["Authorization"] = f"Bearer {github_token}"
+        resp = requests.get(GITHUB_API_URL, headers=headers, timeout=15)
+        resp.raise_for_status()
+        latest_tag = resp.json().get("tag_name", "")
+        if latest_tag:
+            # Normalize: strip leading 'v' or trailing whitespace
+            latest_ver = latest_tag.lstrip("v").strip()
+            current = (info["bootloader_version"] or "").strip()
+            print(f"  Latest available   : {latest_tag}")
+            if current and latest_ver and current == latest_ver:
+                print("  Status             : Up to date ✓")
+            elif current and latest_ver:
+                print(f"  Status             : Different version (current: {current}, latest: {latest_ver})")
+                print(f"  To update, run: python {sys.argv[0]}")
+            print()
+    except (ImportError, OSError, ValueError):
+        # Non-critical; just skip the comparison
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -424,6 +612,7 @@ Works on ALL bootloader versions including very old/broken ones.
 Runs on Windows, macOS, and Linux.
 
 examples:
+  %(prog)s --version                          # Read current bootloader version
   %(prog)s                                    # Auto-detect port
   %(prog)s --port /dev/ttyACM0                # Linux: specify port
   %(prog)s --port /dev/cu.usbmodem14101       # macOS: specify port
@@ -431,6 +620,11 @@ examples:
   %(prog)s --board standard                   # Non-Sense XIAO variant
   %(prog)s --pkg bootloader.zip               # Use local DFU package
 """,
+    )
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Read and display the current bootloader version (requires UF2 boot drive)",
     )
     parser.add_argument(
         "--board",
@@ -451,6 +645,11 @@ examples:
         help="Path to a local .zip DFU package (skips download)",
     )
     args = parser.parse_args()
+
+    # --version: read current bootloader version and exit
+    if args.version:
+        do_read_version()
+        return
 
     print_header()
 
