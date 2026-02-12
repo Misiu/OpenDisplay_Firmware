@@ -186,6 +186,7 @@ bool displayPowerState = false;  // Track display power state (true = powered on
 bool otaActive = false;           // True when OTA update is in progress
 uint32_t otaTotalSize = 0;        // Total firmware size expected
 uint32_t otaBytesReceived = 0;    // Total firmware bytes received so far
+uint8_t otaLastLoggedPct = 0;     // Last logged progress percentage (for 10% logging)
 
 bool waitforrefresh(int timeout);
 void pwrmgm(bool onoff);

@@ -2305,6 +2305,7 @@ void handleOtaStart(uint8_t* data, uint16_t len){
     otaActive = true;
     otaTotalSize = firmwareSize;
     otaBytesReceived = 0;
+    otaLastLoggedPct = 0;
     writeSerial("OTA update initialized, ready to receive firmware data");
 
     uint8_t response[] = {0x00, RESP_OTA_START};
@@ -2347,10 +2348,9 @@ void handleOtaData(uint8_t* data, uint16_t len){
     // Log progress every ~10%
     if (otaTotalSize > 0) {
         uint8_t pct = (uint8_t)((otaBytesReceived * 100) / otaTotalSize);
-        static uint8_t lastLoggedPct = 0;
-        if (pct / 10 != lastLoggedPct / 10) {
+        if (pct / 10 != otaLastLoggedPct / 10) {
             writeSerial("OTA progress: " + String(otaBytesReceived) + "/" + String(otaTotalSize) + " (" + String(pct) + "%)");
-            lastLoggedPct = pct;
+            otaLastLoggedPct = pct;
         }
     }
 
