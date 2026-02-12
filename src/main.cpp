@@ -2818,7 +2818,11 @@ bool detectCharging() {
     if ((globalConfig.power_option.battery_sense_flags & BATTERY_SENSE_FLAG_VBUS_PIN) != 0) {
         uint8_t vbusPin = globalConfig.power_option.reserved[0];
         if (vbusPin != 0xFF) {
-            pinMode(vbusPin, INPUT);
+            static bool vbusPinInitialized = false;
+            if (!vbusPinInitialized) {
+                pinMode(vbusPin, INPUT);
+                vbusPinInitialized = true;
+            }
             return digitalRead(vbusPin) == HIGH;
         }
     }
@@ -2828,7 +2832,7 @@ bool detectCharging() {
     // a USB host is connected and VBUS power is present.
     // Limitation: does NOT detect power-only USB cables or simple chargers without a host.
     uint32_t frame1 = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) & USB_SERIAL_JTAG_SOF_FRAME_INDEX_M;
-    delayMicroseconds(1200);
+    delayMicroseconds(1200); // Wait >1ms to ensure at least one USB SOF frame interval passes
     uint32_t frame2 = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) & USB_SERIAL_JTAG_SOF_FRAME_INDEX_M;
     return (frame1 != frame2);
     #else
