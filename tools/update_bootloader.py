@@ -103,8 +103,9 @@ def print_header():
     print()
     print("  The .zip DFU package contains both the bootloader AND the Nordic")
     print("  SoftDevice (BLE stack), so this is a complete update that works")
-    print("  regardless of what bootloader version is currently installed.")
-    print("  The bootloader can also be freely upgraded or downgraded.")
+    print("  regardless of what bootloader version or firmware is currently")
+    print("  installed — even on a brand-new board with factory defaults.")
+    print("  No specific firmware needs to be running on the board.")
     print()
 
 
@@ -483,6 +484,8 @@ examples:
         print_step(3, "Enter DFU bootloader mode")
         print()
         print("  Connect the board via USB, then double-tap the RESET button.")
+        print("  This works regardless of what firmware is on the board.")
+        print()
         print("  The board LED should start pulsing/fading and a USB drive")
         print("  ending in 'BOOT' should appear (e.g., XIAO-SENSE).")
         print()
