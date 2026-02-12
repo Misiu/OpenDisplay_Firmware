@@ -81,4 +81,7 @@ dkms.conf
 ### Other files
 .idea
 
-
+### Python
+__pycache__/
+*.pyc
+*.pyo
