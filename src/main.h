@@ -60,6 +60,9 @@ using namespace Adafruit_LittleFS_Namespace;
 #define RESP_FIRMWARE_VERSION        0x43  // Firmware version response
 #define RESP_ENTER_DFU_OTA           0x44  // Enter OTA DFU mode acknowledgment
 #define RESP_ENTER_DFU_SERIAL        0x45  // Enter Serial/USB DFU mode acknowledgment
+#define RESP_OTA_START               0x46  // ESP32 BLE OTA start acknowledgment
+#define RESP_OTA_DATA                0x47  // ESP32 BLE OTA data acknowledgment
+#define RESP_OTA_END                 0x48  // ESP32 BLE OTA end acknowledgment
 
 // Communication mode bit definitions (for system_config.communication_modes)
 #define COMM_MODE_BLE           (1 << 0)  // Bit 0: BLE transfer supported
@@ -99,6 +102,7 @@ extern "C" {
 #include "esp_sleep.h"
 #include <WiFi.h>
 #include <ESPmDNS.h>
+#include <Update.h>
 
 extern BLEServer* pServer;
 extern BLEService* pService;
@@ -178,6 +182,11 @@ uint8_t* directWriteCompressedBuffer = nullptr;  // Pointer to compressedDataBuf
 uint32_t directWriteStartTime = 0;  // Timestamp when direct write started (for timeout detection)
 bool displayPowerState = false;  // Track display power state (true = powered on, false = powered off)
 
+// BLE OTA update state (ESP32 only)
+bool otaActive = false;           // True when OTA update is in progress
+uint32_t otaTotalSize = 0;        // Total firmware size expected
+uint32_t otaBytesReceived = 0;    // Total firmware bytes received so far
+
 bool waitforrefresh(int timeout);
 void pwrmgm(bool onoff);
 bool powerDownExternalFlash(uint8_t mosiPin, uint8_t misoPin, uint8_t sckPin, uint8_t csPin, uint8_t wpPin, uint8_t holdPin);
@@ -240,6 +249,9 @@ void handleWriteConfigChunk(uint8_t* data, uint16_t len);
 void handleFirmwareVersion();
 void handleEnterDfuMode();
 void handleEnterSerialDfuMode();
+void handleOtaStart(uint8_t* data, uint16_t len);
+void handleOtaData(uint8_t* data, uint16_t len);
+void handleOtaEnd();
 void cleanupDirectWriteState(bool refreshDisplay);
 void handleDirectWriteStart(uint8_t* data, uint16_t len);
 void handleDirectWriteData(uint8_t* data, uint16_t len);
