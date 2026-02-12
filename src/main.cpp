@@ -2213,7 +2213,7 @@ void handleFirmwareVersion(){
     uint8_t response[2 + 1 + 1 + 1 + 40];
     uint16_t offset = 0;
     response[offset++] = 0x00;
-    response[offset++] = 0x43;
+    response[offset++] = RESP_FIRMWARE_VERSION;
     response[offset++] = major;
     response[offset++] = minor;
     response[offset++] = shaLen;
@@ -2222,6 +2222,48 @@ void handleFirmwareVersion(){
     }
     sendResponse(response, offset);
     writeSerial("Firmware version response sent");
+}
+
+void handleEnterDfuMode(){
+    writeSerial("=== ENTER OTA DFU MODE ===");
+    #ifdef TARGET_NRF
+    // Send confirmation response before resetting
+    uint8_t response[] = {0x00, RESP_ENTER_DFU_OTA};
+    sendResponse(response, sizeof(response));
+    delay(500); // Allow BLE response to be transmitted
+
+    // Write OTA DFU magic to GPREGRET register and reset into bootloader
+    // The Adafruit nRF52 bootloader recognizes 0xB1 as the signal to enter OTA DFU mode
+    sd_power_gpregret_clr(0, 0xffffffff);
+    sd_power_gpregret_set(0, 0xB1);
+    writeSerial("Resetting into OTA DFU bootloader...");
+    NVIC_SystemReset();
+    #else
+    writeSerial("OTA DFU mode not supported on this platform via this command");
+    uint8_t response[] = {0xFF, RESP_ENTER_DFU_OTA};
+    sendResponse(response, sizeof(response));
+    #endif
+}
+
+void handleEnterSerialDfuMode(){
+    writeSerial("=== ENTER SERIAL/USB DFU MODE ===");
+    #ifdef TARGET_NRF
+    // Send confirmation response before resetting
+    uint8_t response[] = {0x00, RESP_ENTER_DFU_SERIAL};
+    sendResponse(response, sizeof(response));
+    delay(500); // Allow BLE response to be transmitted
+
+    // Write Serial DFU magic to GPREGRET register and reset into bootloader
+    // The Adafruit nRF52 bootloader recognizes 0x4E as the signal to enter USB/Serial DFU mode
+    sd_power_gpregret_clr(0, 0xffffffff);
+    sd_power_gpregret_set(0, 0x4E);
+    writeSerial("Resetting into Serial/USB DFU bootloader...");
+    NVIC_SystemReset();
+    #else
+    writeSerial("Serial DFU mode not supported on this platform via this command");
+    uint8_t response[] = {0xFF, RESP_ENTER_DFU_SERIAL};
+    sendResponse(response, sizeof(response));
+    #endif
 }
 
 void handleWriteConfig(uint8_t* data, uint16_t len){
@@ -3503,6 +3545,14 @@ void imageDataWritten(BLEConnHandle conn_hdl, BLECharPtr chr, uint8_t* data, uin
         case 0x0043: // Firmware Version command
             writeSerial("=== FIRMWARE VERSION COMMAND (0x0043) ===");
             handleFirmwareVersion();
+            break;
+        case 0x0044: // Enter OTA DFU Mode command
+            writeSerial("=== ENTER OTA DFU MODE COMMAND (0x0044) ===");
+            handleEnterDfuMode();
+            break;
+        case 0x0045: // Enter Serial/USB DFU Mode command
+            writeSerial("=== ENTER SERIAL/USB DFU MODE COMMAND (0x0045) ===");
+            handleEnterSerialDfuMode();
             break;
         case 0x0070: // Direct Write Start command
             writeSerial("=== DIRECT WRITE START COMMAND (0x0070) ===");

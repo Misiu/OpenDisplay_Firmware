@@ -57,6 +57,9 @@ using namespace Adafruit_LittleFS_Namespace;
 #define RESP_CONFIG_READ             0x40  // Config read response
 #define RESP_CONFIG_WRITE             0x41  // Config write response
 #define RESP_CONFIG_CHUNK             0x42  // Config chunk response
+#define RESP_FIRMWARE_VERSION        0x43  // Firmware version response
+#define RESP_ENTER_DFU_OTA           0x44  // Enter OTA DFU mode acknowledgment
+#define RESP_ENTER_DFU_SERIAL        0x45  // Enter Serial/USB DFU mode acknowledgment
 
 // Communication mode bit definitions (for system_config.communication_modes)
 #define COMM_MODE_BLE           (1 << 0)  // Bit 0: BLE transfer supported
@@ -235,6 +238,8 @@ void handleReadConfig();
 void handleWriteConfig(uint8_t* data, uint16_t len);
 void handleWriteConfigChunk(uint8_t* data, uint16_t len);
 void handleFirmwareVersion();
+void handleEnterDfuMode();
+void handleEnterSerialDfuMode();
 void cleanupDirectWriteState(bool refreshDisplay);
 void handleDirectWriteStart(uint8_t* data, uint16_t len);
 void handleDirectWriteData(uint8_t* data, uint16_t len);
