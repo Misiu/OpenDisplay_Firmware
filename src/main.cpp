@@ -774,10 +774,13 @@ void powerDownAXP2101(){
 void updatemsdata(){
     float batteryVoltage = readBatteryVoltage();
     float chipTemperature = readChipTemperature();
+    bool batteryPowered = (globalConfig.power_option.power_mode == 1);
     bool charging = detectCharging();
     writeSerial("Battery voltage: " + String(batteryVoltage) + "V");
     writeSerial("Chip temperature: " + String(chipTemperature) + "C");
-    writeSerial("Charging: " + String(charging ? "Yes" : "No"));
+    if (batteryPowered) {
+        writeSerial("Charging: " + String(charging ? "Yes" : "No"));
+    }
     uint8_t chiptemp8 = (uint8_t)chipTemperature;
     uint16_t batteryVoltageMv = (uint16_t)(batteryVoltage * 1000);
     uint8_t batterymvvoltage8_high = (uint8_t)(batteryVoltageMv >> 8);
@@ -1338,9 +1341,10 @@ void sendImageRequest() {
     wifiClient.flush();
     if (bytesWritten == pos) {
         writeSerial("Image Request sent successfully (" + String(bytesWritten) + " bytes)");
-        writeSerial("Battery: " + String(batteryPercent == 0xFF ? "AC" : String(batteryPercent) + "%") + 
-                   ", Charging: " + String(charging ? "Yes" : "No") +
-                   ", RSSI: " + String(rssi) + " dBm");
+        String battStr = (batteryPercent == 0xFF) ? "AC" : String(batteryPercent) + "%";
+        String chargStr = (globalConfig.power_option.power_mode == 1) ? 
+                          (String(", Charging: ") + String(charging ? "Yes" : "No")) : "";
+        writeSerial("Battery: " + battStr + chargStr + ", RSSI: " + String(rssi) + " dBm");
     } else {
         writeSerial("ERROR: Failed to send complete Image Request (expected " + 
                    String(pos) + ", wrote " + String(bytesWritten) + ")");
@@ -2661,9 +2665,8 @@ void printConfigSummary(){
     writeSerial("Battery Sense Pin: " + String(globalConfig.power_option.battery_sense_pin));
     writeSerial("Battery Sense Enable Pin: " + String(globalConfig.power_option.battery_sense_enable_pin));
     writeSerial("Battery Sense Flags: 0x" + String(globalConfig.power_option.battery_sense_flags, HEX));
-    if (globalConfig.power_option.battery_sense_flags & BATTERY_SENSE_FLAG_VBUS_PIN) {
-        writeSerial("VBUS Sense Pin: " + String(globalConfig.power_option.reserved[0]));
-    }
+    writeSerial("VBUS Sense Pin: " + String(globalConfig.power_option.vbus_sense_pin) + 
+               (globalConfig.power_option.vbus_sense_pin == 0xFF ? " (auto-detect by board type)" : ""));
     writeSerial("Capacity Estimator: " + String(globalConfig.power_option.capacity_estimator));
     writeSerial("Voltage Scaling Factor: " + String(globalConfig.power_option.voltage_scaling_factor));
     writeSerial("Deep Sleep Current: " + String(globalConfig.power_option.deep_sleep_current_ua) + " uA");
@@ -2811,20 +2814,38 @@ float readChipTemperature() {
 }
 
 bool detectCharging() {
+    // Only detect charging when device is battery powered
+    if (globalConfig.power_option.power_mode != 1) {
+        return false;
+    }
+
     #ifdef TARGET_ESP32
-    // Method 1: Check for configured VBUS sense GPIO pin (works with ALL cable types,
-    // including power-only USB cables that lack D+/D- data lines).
-    // If battery_sense_flags bit 0 is set, reserved[0] contains the VBUS GPIO pin number.
-    if ((globalConfig.power_option.battery_sense_flags & BATTERY_SENSE_FLAG_VBUS_PIN) != 0) {
-        uint8_t vbusPin = globalConfig.power_option.reserved[0];
-        if (vbusPin != 0xFF) {
-            static bool vbusPinInitialized = false;
-            if (!vbusPinInitialized) {
-                pinMode(vbusPin, INPUT);
-                vbusPinInitialized = true;
+    // Determine the VBUS sense pin: use explicit config pin, or fall back to
+    // known board defaults for ee04/en04, or skip GPIO detection for DIY boards.
+    static bool vbusPinInitialized = false;
+    static uint8_t resolvedVbusPin = 0xFF;
+
+    if (!vbusPinInitialized) {
+        vbusPinInitialized = true;
+        if (globalConfig.power_option.vbus_sense_pin != 0xFF) {
+            // DIY boards: explicit VBUS pin set in config
+            resolvedVbusPin = globalConfig.power_option.vbus_sense_pin;
+        } else {
+            // Known boards: look up VBUS pin by board type
+            uint8_t bt = globalConfig.manufacturer_data.board_type;
+            if (bt == BOARD_TYPE_EE04 || bt == BOARD_TYPE_EN04) {
+                resolvedVbusPin = BOARD_EE04_EN04_VBUS_PIN;
             }
-            return digitalRead(vbusPin) == HIGH;
         }
+        if (resolvedVbusPin != 0xFF) {
+            pinMode(resolvedVbusPin, INPUT);
+        }
+    }
+
+    // Method 1: GPIO-based VBUS detection (works with ALL cable types,
+    // including power-only USB cables that lack D+/D- data lines).
+    if (resolvedVbusPin != 0xFF) {
+        return digitalRead(resolvedVbusPin) == HIGH;
     }
 
     // Method 2: Detect USB host connection via SOF (Start of Frame) packets.

@@ -49,7 +49,8 @@ struct PowerOption {
     uint16_t voltage_scaling_factor; // Voltage scaling / divider factor
     uint32_t deep_sleep_current_ua; // Deep sleep current in microamperes
     uint16_t deep_sleep_time_seconds; // Deep sleep duration in seconds (0 if not used)
-    uint8_t reserved[10];        // Reserved bytes for future use
+    uint8_t vbus_sense_pin;     // Pin used to detect VBUS/USB power (0xFF = auto-detect by board type)
+    uint8_t reserved[9];        // Reserved bytes for future use
 } __attribute__((packed));
 
 // 0x20: display (repeatable, max 4 instances)

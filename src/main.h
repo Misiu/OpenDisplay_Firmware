@@ -75,8 +75,11 @@ using namespace Adafruit_LittleFS_Namespace;
 #define TRANSMISSION_MODE_DIRECT_WRITE (1 << 3)  // Bit 3: Direct write mode (bufferless)
 #define TRANSMISSION_MODE_CLEAR_ON_BOOT (1 << 7) // Bit 7: Clear screen at bootup (writeTextAndFill with empty string)
 
-// Battery sense flags bit definitions (for power_option.battery_sense_flags)
-#define BATTERY_SENSE_FLAG_VBUS_PIN  (1 << 0)  // Bit 0: VBUS detection pin present (pin in reserved[0])
+// Known board types (manufacturer_data.board_type) with predefined VBUS sense pins
+#define BOARD_TYPE_EE04  0x01  // Xiao ee04 (ESP32-S3 based)
+#define BOARD_TYPE_EN04  0x02  // Xiao en04 (ESP32-S3 based)
+// VBUS sense GPIO for ee04/en04 boards (active HIGH when USB power present)
+#define BOARD_EE04_EN04_VBUS_PIN  4
 
 #ifdef TARGET_NRF
 #include <bluefruit.h>
