@@ -75,6 +75,9 @@ using namespace Adafruit_LittleFS_Namespace;
 #define TRANSMISSION_MODE_DIRECT_WRITE (1 << 3)  // Bit 3: Direct write mode (bufferless)
 #define TRANSMISSION_MODE_CLEAR_ON_BOOT (1 << 7) // Bit 7: Clear screen at bootup (writeTextAndFill with empty string)
 
+// Battery sense flags bit definitions (for power_option.battery_sense_flags)
+#define BATTERY_SENSE_FLAG_VBUS_PIN  (1 << 0)  // Bit 0: VBUS detection pin present (pin in reserved[0])
+
 #ifdef TARGET_NRF
 #include <bluefruit.h>
 extern BLEDfu bledfu;
@@ -96,6 +99,7 @@ extern "C" {
 #include "esp_sleep.h"
 #include <WiFi.h>
 #include <ESPmDNS.h>
+#include "soc/usb_serial_jtag_reg.h"
 
 extern BLEServer* pServer;
 extern BLEService* pService;
@@ -248,6 +252,7 @@ uint8_t getFirmwareMajor();
 uint8_t getFirmwareMinor();
 float readBatteryVoltage();  // Returns battery voltage in volts, or -1.0 if not configured
 float readChipTemperature();  // Returns chip temperature in degrees Celsius
+bool detectCharging();  // Returns true if USB power is detected (battery may be charging)
 int getplane();
 int getBitsPerPixel();
 void writeTextAndFill(const char* text);
