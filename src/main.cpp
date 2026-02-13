@@ -41,7 +41,6 @@ void setup() {
     // for e-paper displays. 80MHz was considered but may cause SPI timing issues and is
     // the absolute minimum for BLE on some ESP32 variants (C3, C6 max at 160MHz).
     // Ref: https://docs.espressif.com/projects/arduino-esp32/en/latest/api/system.html
-    // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/power_management.html
     if (globalConfig.power_option.power_mode == 1) {
         setCpuFrequencyMhz(160);
         writeSerial("CPU frequency reduced to 160MHz (battery mode)");
@@ -1414,7 +1413,7 @@ void initWiFi() {
         // The ESP32 WiFi modem is enabled at boot even without WiFi.begin().
         // Disabling it saves ~20mA. This is safe — WiFi and BLE share the same
         // 2.4GHz radio but are managed independently by the ESP-IDF controller.
-        // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/wifi.html
+        // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html
         if (globalConfig.power_option.power_mode == 1) {
             WiFi.mode(WIFI_OFF);
             writeSerial("WiFi radio disabled (BLE-only battery mode)");
