@@ -96,6 +96,9 @@ extern "C" {
 #include <esp_mac.h>
 #include <esp_timer.h>
 #include "esp_sleep.h"
+#include "esp_pm.h"
+#include "esp_wifi.h"
+#include "esp_bt.h"
 #include <WiFi.h>
 #include <ESPmDNS.h>
 

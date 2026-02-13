@@ -35,6 +35,16 @@ void setup() {
     #endif
     writeSerial("Starting setup...");
     full_config_init();
+    #ifdef TARGET_ESP32
+    // Reduce CPU frequency for battery-powered devices
+    // 80MHz is sufficient for BLE + e-paper operations and uses ~half the power of 240MHz
+    // Ref: https://docs.espressif.com/projects/arduino-esp32/en/latest/api/system.html
+    // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/power_management.html
+    if (globalConfig.power_option.power_mode == 1) {
+        setCpuFrequencyMhz(80);
+        writeSerial("CPU frequency reduced to 80MHz (battery mode)");
+    }
+    #endif
     initio();
     ble_init();
     writeSerial("BLE advertising started - waiting for connections...");
@@ -378,7 +388,20 @@ void idleDelay(uint32_t delayMs) {
     while (remainingDelay > 0) {
         processButtonEvents();
         uint32_t chunkDelay = (remainingDelay > CHECK_INTERVAL_MS) ? CHECK_INTERVAL_MS : remainingDelay;
+        #ifdef TARGET_ESP32
+        // Use esp_sleep light sleep for battery-powered ESP32 devices instead of active delay()
+        // Light sleep reduces idle current from ~30-50mA to ~0.8mA while maintaining BLE/WiFi
+        // GPIO interrupts (buttons) and timers will wake the CPU from light sleep
+        // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/sleep_modes.html#entering-light-sleep
+        if (globalConfig.power_option.power_mode == 1) {
+            esp_sleep_enable_timer_wakeup(chunkDelay * 1000ULL);  // Convert ms to us
+            esp_light_sleep_start();
+        } else {
+            delay(chunkDelay);
+        }
+        #else
         delay(chunkDelay);
+        #endif
         remainingDelay -= chunkDelay;
     }
 }
@@ -1305,6 +1328,25 @@ void ble_init_esp32(bool update_manufacturer_data) {
     String deviceName = "OD" + getChipIdHex();
     writeSerial("Device name will be: " + deviceName);
     BLEDevice::init(deviceName.c_str());
+    // Set BLE TX power from config (matching NRF behavior)
+    // ESP32 BLE power levels: ESP_PWR_LVL_N12 (-12dBm) to ESP_PWR_LVL_P9 (+9dBm)
+    // Map config tx_power (0-8) to ESP32 power levels
+    // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/bluetooth/controller_vhci.html
+    esp_power_level_t ble_power_level;
+    switch (globalConfig.power_option.tx_power) {
+        case 0: ble_power_level = ESP_PWR_LVL_N12; break;  // -12 dBm
+        case 1: ble_power_level = ESP_PWR_LVL_N9;  break;  // -9 dBm
+        case 2: ble_power_level = ESP_PWR_LVL_N6;  break;  // -6 dBm
+        case 3: ble_power_level = ESP_PWR_LVL_N3;  break;  // -3 dBm
+        case 4: ble_power_level = ESP_PWR_LVL_N0;  break;  //  0 dBm
+        case 5: ble_power_level = ESP_PWR_LVL_P3;  break;  // +3 dBm
+        case 6: ble_power_level = ESP_PWR_LVL_P6;  break;  // +6 dBm
+        case 7: ble_power_level = ESP_PWR_LVL_P9;  break;  // +9 dBm
+        default: ble_power_level = ESP_PWR_LVL_P3; break;  // Default: +3 dBm (moderate)
+    }
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ble_power_level);
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ble_power_level);
+    writeSerial("BLE TX power set to level " + String(globalConfig.power_option.tx_power));
     writeSerial("Setting BLE MTU to 512...");
     BLEDevice::setMTU(512);
     pServer = BLEDevice::createServer();
@@ -1353,7 +1395,12 @@ void ble_init_esp32(bool update_manufacturer_data) {
     pAdvertising->setScanResponse(false);
     pAdvertising->setMinPreferred(0x0006);
     pAdvertising->setMinPreferred(0x0012);
-    writeSerial("Advertising intervals set");
+    // Set advertising interval: 100ms min, 250ms max (in 0.625ms units)
+    // Matches NRF behavior of setInterval(32, 200) but slightly slower for better battery life
+    // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/bluetooth/esp_gap_ble.html
+    pAdvertising->setMinInterval(0x00A0);  // 100ms (0xA0 * 0.625ms)
+    pAdvertising->setMaxInterval(0x0190);  // 250ms (0x190 * 0.625ms)
+    writeSerial("BLE advertising intervals set (100ms-250ms)");
     pServer->getAdvertising()->setMinPreferred(0x06);
     pServer->getAdvertising()->setMinPreferred(0x12);
     pServer->getAdvertising()->start();
@@ -1379,14 +1426,21 @@ void initWiFi() {
     writeSerial("SSID: \"" + String(wifiSsid) + "\"");
     String deviceName = "OD" + getChipIdHex();
     WiFi.setAutoReconnect(true);
-    WiFi.setTxPower(WIFI_POWER_15dBm);
     wifiSsid[32] = '\0';
     wifiPassword[32] = '\0';
     writeSerial("Encryption type: 0x" + String(wifiEncryptionType, HEX));
     wifiConnected = false;
     wifiInitialized = true;
     WiFi.begin(wifiSsid, wifiPassword);
-    WiFi.setTxPower(WIFI_POWER_15dBm);
+    // Set WiFi TX power: use lower power for battery-powered devices to save energy
+    // Ref: https://docs.espressif.com/projects/arduino-esp32/en/latest/api/wifi.html
+    if (globalConfig.power_option.power_mode == 1) {
+        WiFi.setTxPower(WIFI_POWER_8_5dBm);  // Battery mode: moderate TX power
+        writeSerial("WiFi TX power set to 8.5dBm (battery mode)");
+    } else {
+        WiFi.setTxPower(WIFI_POWER_15dBm);  // Mains powered: full TX power
+        writeSerial("WiFi TX power set to 15dBm (mains mode)");
+    }
     writeSerial("Waiting for WiFi connection...");
     const int maxRetries = 3;
     const unsigned long timeoutPerRetry = 10000;
@@ -1422,6 +1476,13 @@ void initWiFi() {
         writeSerial("SSID: " + String(wifiSsid));
         writeSerial("IP Address: " + WiFi.localIP().toString());
         writeSerial("RSSI: " + String(WiFi.RSSI()) + " dBm");
+        // Enable WiFi modem sleep: radio turns off between DTIM beacon intervals
+        // This significantly reduces power consumption when WiFi is idle (~160mA -> ~20mA)
+        // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/wifi.html#esp32-wi-fi-power-saving-mode
+        if (globalConfig.power_option.power_mode == 1) {
+            esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+            writeSerial("WiFi modem sleep enabled (battery mode)");
+        }
         writeSerial("=== Initializing mDNS ===");
         if (MDNS.begin(deviceName.c_str())) {
             writeSerial("mDNS responder started: " + deviceName + ".local");
@@ -1888,6 +1949,13 @@ void enterDeepSleep() {
     }
     writeSerial("Entering deep sleep for " + String(globalConfig.power_option.deep_sleep_time_seconds) + " seconds");
     woke_from_deep_sleep = true; // Will be true on next boot
+    // Shut down WiFi before deep sleep to ensure radio is off
+    // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/sleep_modes.html
+    if (wifiInitialized) {
+        WiFi.disconnect(true);  // Disconnect and turn off WiFi radio
+        WiFi.mode(WIFI_OFF);
+        writeSerial("WiFi shut down for deep sleep");
+    }
     if (pServer != nullptr) {
         BLEAdvertising *pAdvertising = pServer->getAdvertising();
         if (pAdvertising != nullptr) {
