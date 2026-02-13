@@ -75,6 +75,10 @@ using namespace Adafruit_LittleFS_Namespace;
 #define TRANSMISSION_MODE_DIRECT_WRITE (1 << 3)  // Bit 3: Direct write mode (bufferless)
 #define TRANSMISSION_MODE_CLEAR_ON_BOOT (1 << 7) // Bit 7: Clear screen at bootup (writeTextAndFill with empty string)
 
+// BLE advertising interval constants (in 0.625ms units, ESP32 only)
+#define BLE_ADV_INTERVAL_MIN  0x00A0  // 100ms (0xA0 * 0.625ms)
+#define BLE_ADV_INTERVAL_MAX  0x0190  // 250ms (0x190 * 0.625ms)
+
 #ifdef TARGET_NRF
 #include <bluefruit.h>
 extern BLEDfu bledfu;

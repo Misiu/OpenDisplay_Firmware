@@ -1330,20 +1330,21 @@ void ble_init_esp32(bool update_manufacturer_data) {
     BLEDevice::init(deviceName.c_str());
     // Set BLE TX power from config (matching NRF behavior)
     // ESP32 BLE power levels: ESP_PWR_LVL_N12 (-12dBm) to ESP_PWR_LVL_P9 (+9dBm)
-    // Map config tx_power (0-8) to ESP32 power levels
+    // Map config tx_power (0-7) to ESP32 power levels; values >=8 default to +3dBm (moderate)
     // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/bluetooth/controller_vhci.html
-    esp_power_level_t ble_power_level;
-    switch (globalConfig.power_option.tx_power) {
-        case 0: ble_power_level = ESP_PWR_LVL_N12; break;  // -12 dBm
-        case 1: ble_power_level = ESP_PWR_LVL_N9;  break;  // -9 dBm
-        case 2: ble_power_level = ESP_PWR_LVL_N6;  break;  // -6 dBm
-        case 3: ble_power_level = ESP_PWR_LVL_N3;  break;  // -3 dBm
-        case 4: ble_power_level = ESP_PWR_LVL_N0;  break;  //  0 dBm
-        case 5: ble_power_level = ESP_PWR_LVL_P3;  break;  // +3 dBm
-        case 6: ble_power_level = ESP_PWR_LVL_P6;  break;  // +6 dBm
-        case 7: ble_power_level = ESP_PWR_LVL_P9;  break;  // +9 dBm
-        default: ble_power_level = ESP_PWR_LVL_P3; break;  // Default: +3 dBm (moderate)
-    }
+    static const esp_power_level_t ble_power_map[] = {
+        ESP_PWR_LVL_N12,  // 0: -12 dBm
+        ESP_PWR_LVL_N9,   // 1:  -9 dBm
+        ESP_PWR_LVL_N6,   // 2:  -6 dBm
+        ESP_PWR_LVL_N3,   // 3:  -3 dBm
+        ESP_PWR_LVL_N0,   // 4:   0 dBm
+        ESP_PWR_LVL_P3,   // 5:  +3 dBm
+        ESP_PWR_LVL_P6,   // 6:  +6 dBm
+        ESP_PWR_LVL_P9,   // 7:  +9 dBm
+    };
+    esp_power_level_t ble_power_level = (globalConfig.power_option.tx_power < 8)
+        ? ble_power_map[globalConfig.power_option.tx_power]
+        : ESP_PWR_LVL_P3;  // Default for out-of-range values
     esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ble_power_level);
     esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ble_power_level);
     writeSerial("BLE TX power set to level " + String(globalConfig.power_option.tx_power));
@@ -1398,8 +1399,8 @@ void ble_init_esp32(bool update_manufacturer_data) {
     // Set advertising interval: 100ms min, 250ms max (in 0.625ms units)
     // Matches NRF behavior of setInterval(32, 200) but slightly slower for better battery life
     // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/bluetooth/esp_gap_ble.html
-    pAdvertising->setMinInterval(0x00A0);  // 100ms (0xA0 * 0.625ms)
-    pAdvertising->setMaxInterval(0x0190);  // 250ms (0x190 * 0.625ms)
+    pAdvertising->setMinInterval(BLE_ADV_INTERVAL_MIN);  // 100ms
+    pAdvertising->setMaxInterval(BLE_ADV_INTERVAL_MAX);  // 250ms
     writeSerial("BLE advertising intervals set (100ms-250ms)");
     pServer->getAdvertising()->setMinPreferred(0x06);
     pServer->getAdvertising()->setMinPreferred(0x12);
