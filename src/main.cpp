@@ -37,12 +37,14 @@ void setup() {
     full_config_init();
     #ifdef TARGET_ESP32
     // Reduce CPU frequency for battery-powered devices
-    // 80MHz is sufficient for BLE + e-paper operations and uses ~half the power of 240MHz
+    // 160MHz provides ~35% power savings vs 240MHz while maintaining reliable SPI timing
+    // for e-paper displays. 80MHz was considered but may cause SPI timing issues and is
+    // the absolute minimum for BLE on some ESP32 variants (C3, C6 max at 160MHz).
     // Ref: https://docs.espressif.com/projects/arduino-esp32/en/latest/api/system.html
     // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/power_management.html
     if (globalConfig.power_option.power_mode == 1) {
-        setCpuFrequencyMhz(80);
-        writeSerial("CPU frequency reduced to 80MHz (battery mode)");
+        setCpuFrequencyMhz(160);
+        writeSerial("CPU frequency reduced to 160MHz (battery mode)");
     }
     #endif
     initio();
@@ -388,20 +390,12 @@ void idleDelay(uint32_t delayMs) {
     while (remainingDelay > 0) {
         processButtonEvents();
         uint32_t chunkDelay = (remainingDelay > CHECK_INTERVAL_MS) ? CHECK_INTERVAL_MS : remainingDelay;
-        #ifdef TARGET_ESP32
-        // Use esp_sleep light sleep for battery-powered ESP32 devices instead of active delay()
-        // Light sleep reduces idle current from ~30-50mA to ~0.8mA while maintaining BLE/WiFi
-        // GPIO interrupts (buttons) and timers will wake the CPU from light sleep
-        // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/sleep_modes.html#entering-light-sleep
-        if (globalConfig.power_option.power_mode == 1) {
-            esp_sleep_enable_timer_wakeup(chunkDelay * 1000ULL);  // Convert ms to us
-            esp_light_sleep_start();
-        } else {
-            delay(chunkDelay);
-        }
-        #else
+        // Note: esp_light_sleep_start() was considered here for battery savings, but it is
+        // incompatible with BLE advertising — it stops the CPU/radio and causes the device
+        // to become undiscoverable. The BLE controller needs the CPU active to transmit
+        // advertising packets. Power savings for idle periods are achieved via deep sleep
+        // (enterDeepSleep), CPU frequency reduction, and WiFi radio disable instead.
         delay(chunkDelay);
-        #endif
         remainingDelay -= chunkDelay;
     }
 }
@@ -1416,6 +1410,15 @@ void initWiFi() {
     
     if (!(globalConfig.system_config.communication_modes & COMM_MODE_WIFI)) {
         writeSerial("WiFi not enabled in communication_modes, skipping");
+        // Explicitly disable WiFi radio for BLE-only devices to save power.
+        // The ESP32 WiFi modem is enabled at boot even without WiFi.begin().
+        // Disabling it saves ~20mA. This is safe — WiFi and BLE share the same
+        // 2.4GHz radio but are managed independently by the ESP-IDF controller.
+        // Ref: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/wifi.html
+        if (globalConfig.power_option.power_mode == 1) {
+            WiFi.mode(WIFI_OFF);
+            writeSerial("WiFi radio disabled (BLE-only battery mode)");
+        }
         wifiInitialized = false;
         return;
     }
