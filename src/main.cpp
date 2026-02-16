@@ -774,18 +774,13 @@ void powerDownAXP2101(){
 void updatemsdata(){
     float batteryVoltage = readBatteryVoltage();
     float chipTemperature = readChipTemperature();
-    bool batteryPowered = (globalConfig.power_option.power_mode == 1);
-    bool charging = detectCharging();
     writeSerial("Battery voltage: " + String(batteryVoltage) + "V");
     writeSerial("Chip temperature: " + String(chipTemperature) + "C");
-    if (batteryPowered) {
-        writeSerial("Charging: " + String(charging ? "Yes" : "No"));
-    }
     uint8_t chiptemp8 = (uint8_t)chipTemperature;
     uint16_t batteryVoltageMv = (uint16_t)(batteryVoltage * 1000);
     uint8_t batterymvvoltage8_high = (uint8_t)(batteryVoltageMv >> 8);
     uint8_t batterymvvoltage8_low = (uint8_t)(batteryVoltageMv & 0xFF);
-uint8_t msd_payload[14];
+uint8_t msd_payload[13];
 uint16_t msd_cid = 0x2446;
 memset(msd_payload, 0, sizeof(msd_payload));
 memcpy(msd_payload, (uint8_t*)&msd_cid, sizeof(msd_cid));
@@ -800,7 +795,6 @@ msd_payload[9] = batterymvvoltage8_low;
 msd_payload[10] = batterymvvoltage8_high;
 msd_payload[11] = chiptemp8;
 msd_payload[12] = mloopcounter;
-msd_payload[13] = charging ? 0x01 : 0x00;
 #ifdef TARGET_NRF
 Bluefruit.Advertising.clearData();
 Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
@@ -814,8 +808,8 @@ Bluefruit.Advertising.start(0);
 #ifdef TARGET_ESP32
 if (advertisementData != nullptr) {
         String manufacturerDataStr;
-        manufacturerDataStr.reserve(14);
-        for (int i = 0; i < 14; i++) {
+        manufacturerDataStr.reserve(13);
+        for (int i = 0; i < 13; i++) {
             manufacturerDataStr += (char)msd_payload[i];
         }
         advertisementData->setManufacturerData(manufacturerDataStr);
@@ -1315,7 +1309,6 @@ void sendImageRequest() {
     packet[pos++] = 0x02;  // Packet ID: Image Request
     packet[pos++] = 0x02;  // packet_type (always 0x02)
     float batteryVoltage = readBatteryVoltage();
-    bool charging = detectCharging();
     uint8_t batteryPercent = 0xFF;  // Default to AC powered
     if (batteryVoltage > 0) {
         if (batteryVoltage >= 4.2) {
@@ -1329,7 +1322,6 @@ void sendImageRequest() {
     packet[pos++] = batteryPercent;
     int8_t rssi = (int8_t)WiFi.RSSI();
     packet[pos++] = (uint8_t)rssi;
-    packet[pos++] = charging ? 0x01 : 0x00;  // Charging status: 0x00 = not charging, 0x01 = charging
     uint32_t dataLen = pos - 2;  // Length without the 2-byte length field
     uint16_t crc = calculateCRC16CCITT(&packet[2], dataLen);
     packet[pos++] = crc & 0xFF;
@@ -1341,10 +1333,7 @@ void sendImageRequest() {
     wifiClient.flush();
     if (bytesWritten == pos) {
         writeSerial("Image Request sent successfully (" + String(bytesWritten) + " bytes)");
-        String battStr = (batteryPercent == 0xFF) ? "AC" : String(batteryPercent) + "%";
-        String chargStr = (globalConfig.power_option.power_mode == 1) ? 
-                          (String(", Charging: ") + String(charging ? "Yes" : "No")) : "";
-        writeSerial("Battery: " + battStr + chargStr + ", RSSI: " + String(rssi) + " dBm");
+        writeSerial("Battery: " + String(batteryPercent == 0xFF ? "AC" : String(batteryPercent) + "%") + ", RSSI: " + String(rssi) + " dBm");
     } else {
         writeSerial("ERROR: Failed to send complete Image Request (expected " + 
                    String(pos) + ", wrote " + String(bytesWritten) + ")");
@@ -2665,8 +2654,6 @@ void printConfigSummary(){
     writeSerial("Battery Sense Pin: " + String(globalConfig.power_option.battery_sense_pin));
     writeSerial("Battery Sense Enable Pin: " + String(globalConfig.power_option.battery_sense_enable_pin));
     writeSerial("Battery Sense Flags: 0x" + String(globalConfig.power_option.battery_sense_flags, HEX));
-    writeSerial("VBUS Sense Pin: " + String(globalConfig.power_option.vbus_sense_pin) + 
-               (globalConfig.power_option.vbus_sense_pin == 0xFF ? " (auto-detect by board type)" : ""));
     writeSerial("Capacity Estimator: " + String(globalConfig.power_option.capacity_estimator));
     writeSerial("Voltage Scaling Factor: " + String(globalConfig.power_option.voltage_scaling_factor));
     writeSerial("Deep Sleep Current: " + String(globalConfig.power_option.deep_sleep_current_ua) + " uA");
@@ -2778,6 +2765,14 @@ float readBatteryVoltage() {
     const int numSamples = 10;
     uint32_t adcSum = 0;
     for (int i = 0; i < numSamples; i++) {
+        // On ESP32, analogReadMilliVolts() returns a calibrated millivolt value
+        // using the factory-burned eFuse VREF calibration, while analogRead()
+        // returns raw 12-bit ADC counts (0-4095) whose mapping to voltage is
+        // non-linear and uncalibrated. Using raw counts with a linear scaling
+        // factor produces inaccurate results — especially at voltage extremes —
+        // leading to inflated readings (e.g. always 100% battery).
+        // Reference: Espressif ADC Calibration docs
+        // https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/adc_calibration.html
         #ifdef TARGET_ESP32
         adcSum += analogReadMilliVolts(sensePin);
         #else
@@ -2810,54 +2805,6 @@ float readChipTemperature() {
     return -999.0; // Fallback if SoftDevice API fails
     #else
     return -999.0;
-    #endif
-}
-
-bool detectCharging() {
-    // Only detect charging when device is battery powered
-    if (globalConfig.power_option.power_mode != 1) {
-        return false;
-    }
-
-    #ifdef TARGET_ESP32
-    // Determine the VBUS sense pin: use explicit config pin, or fall back to
-    // known board defaults for ee04/en04, or skip GPIO detection for DIY boards.
-    static bool vbusPinInitialized = false;
-    static uint8_t resolvedVbusPin = 0xFF;
-
-    if (!vbusPinInitialized) {
-        vbusPinInitialized = true;
-        if (globalConfig.power_option.vbus_sense_pin != 0xFF) {
-            // DIY boards: explicit VBUS pin set in config
-            resolvedVbusPin = globalConfig.power_option.vbus_sense_pin;
-        } else {
-            // Known boards: look up VBUS pin by board type
-            uint8_t bt = globalConfig.manufacturer_data.board_type;
-            if (bt == BOARD_TYPE_EE04 || bt == BOARD_TYPE_EN04) {
-                resolvedVbusPin = BOARD_EE04_EN04_VBUS_PIN;
-            }
-        }
-        if (resolvedVbusPin != 0xFF) {
-            pinMode(resolvedVbusPin, INPUT);
-        }
-    }
-
-    // Method 1: GPIO-based VBUS detection (works with ALL cable types,
-    // including power-only USB cables that lack D+/D- data lines).
-    if (resolvedVbusPin != 0xFF) {
-        return digitalRead(resolvedVbusPin) == HIGH;
-    }
-
-    // Method 2: Detect USB host connection via SOF (Start of Frame) packets.
-    // USB hosts send SOF every 1ms over data lines; if the frame counter changes,
-    // a USB host is connected and VBUS power is present.
-    // Limitation: does NOT detect power-only USB cables or simple chargers without a host.
-    uint32_t frame1 = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) & USB_SERIAL_JTAG_SOF_FRAME_INDEX_M;
-    delayMicroseconds(1200); // Wait >1ms to ensure at least one USB SOF frame interval passes
-    uint32_t frame2 = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) & USB_SERIAL_JTAG_SOF_FRAME_INDEX_M;
-    return (frame1 != frame2);
-    #else
-    return false;
     #endif
 }
 

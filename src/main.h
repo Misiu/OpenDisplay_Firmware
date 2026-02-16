@@ -75,12 +75,6 @@ using namespace Adafruit_LittleFS_Namespace;
 #define TRANSMISSION_MODE_DIRECT_WRITE (1 << 3)  // Bit 3: Direct write mode (bufferless)
 #define TRANSMISSION_MODE_CLEAR_ON_BOOT (1 << 7) // Bit 7: Clear screen at bootup (writeTextAndFill with empty string)
 
-// Known board types (manufacturer_data.board_type) with predefined VBUS sense pins
-#define BOARD_TYPE_EE04  0x01  // Xiao ee04 (ESP32-S3 based)
-#define BOARD_TYPE_EN04  0x02  // Xiao en04 (ESP32-S3 based)
-// VBUS sense GPIO for ee04/en04 boards (active HIGH when USB power present)
-#define BOARD_EE04_EN04_VBUS_PIN  4
-
 #ifdef TARGET_NRF
 #include <bluefruit.h>
 extern BLEDfu bledfu;
@@ -102,7 +96,6 @@ extern "C" {
 #include "esp_sleep.h"
 #include <WiFi.h>
 #include <ESPmDNS.h>
-#include "soc/usb_serial_jtag_reg.h"
 
 extern BLEServer* pServer;
 extern BLEService* pService;
@@ -255,7 +248,6 @@ uint8_t getFirmwareMajor();
 uint8_t getFirmwareMinor();
 float readBatteryVoltage();  // Returns battery voltage in volts, or -1.0 if not configured
 float readChipTemperature();  // Returns chip temperature in degrees Celsius
-bool detectCharging();  // Returns true if USB power is detected (battery may be charging)
 int getplane();
 int getBitsPerPixel();
 void writeTextAndFill(const char* text);
