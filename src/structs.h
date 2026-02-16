@@ -46,7 +46,7 @@ struct PowerOption {
     uint8_t battery_sense_enable_pin; // Pin that enables battery sense circuit (0xFF if none)
     uint8_t battery_sense_flags; // Battery sense flags (bitfield)
     uint8_t capacity_estimator; // Battery chemistry estimator enum
-    uint16_t voltage_scaling_factor; // Voltage scaling / divider factor
+    uint16_t voltage_scaling_factor; // Divider ratio × 100 (e.g. 217 for ee04/en04 2.17:1 divider)
     uint32_t deep_sleep_current_ua; // Deep sleep current in microamperes
     uint16_t deep_sleep_time_seconds; // Deep sleep duration in seconds (0 if not used)
     uint8_t reserved[10];        // Reserved bytes for future use
