@@ -1925,6 +1925,19 @@ void handleWiFiServer() {
 void minimalSetup() {
     writeSerial("=== Minimal Setup (Deep Sleep Wake) ===");
     full_config_init();
+    // Reduce CPU frequency for battery-powered devices (same as normal boot)
+    if (globalConfig.power_option.power_mode == 1) {
+        setCpuFrequencyMhz(160);
+        writeSerial("CPU frequency reduced to 160MHz (battery mode)");
+    }
+    // Disable WiFi radio for BLE-only battery devices to save ~20mA.
+    // After deep sleep the ESP32 reboots fully, so WiFi modem is back to its default
+    // powered-on state. We must explicitly turn it off again.
+    if (!(globalConfig.system_config.communication_modes & COMM_MODE_WIFI) &&
+        globalConfig.power_option.power_mode == 1) {
+        WiFi.mode(WIFI_OFF);
+        writeSerial("WiFi radio disabled (BLE-only battery mode)");
+    }
     initio();
     ble_init_esp32(true); // Update manufacturer data
     writeSerial("=== BLE advertising started (minimal mode) ===");
@@ -1939,6 +1952,9 @@ void fullSetupAfterConnection() {
     int panelType = mapEpd(globalConfig.displays[0].panel_ic_type);
     writeSerial("Panel type: " + String(panelType));
     bbepSetPanelType(&bbep, panelType);
+    initWiFi();
+    updatemsdata();
+    initButtons();
     writeSerial("=== Full setup completed ===");
 }
 
