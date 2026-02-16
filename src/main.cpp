@@ -2749,6 +2749,22 @@ void printConfigSummary(){
     writeSerial("=============================");
 }
 
+// Reads battery voltage through the configured ADC pin and voltage divider.
+//
+// On ESP32, uses analogReadMilliVolts() for calibrated readings (eFuse VREF).
+// The Seeed wiki uses: voltage = (analogRead() / 4096.0) * 7.16
+// where 7.16 bakes in both the ADC full-scale range and the divider ratio.
+//
+// Our formula: voltage = (adcMilliVolts * voltage_scaling_factor) / 100000.0
+// With analogReadMilliVolts(), voltage_scaling_factor = divider_ratio * 100.
+//
+// For the ee04/en04 board (Seeed wiki factor 7.16):
+//   divider_ratio = 7.16 / 3.3 ≈ 2.17 → voltage_scaling_factor = 217
+//
+// Example: battery 4.2V → ADC reads ~1935 mV → (1935 * 217) / 100000 = 4.20V
+//
+// Reference: https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/adc_calibration.html
+// Seeed wiki: https://wiki.seeedstudio.com/epaper_ee04/#user-battery-on-xiao-epaper-display-boardesp32-s3---ee04
 float readBatteryVoltage() {
     if (globalConfig.power_option.battery_sense_pin == 0xFF) {
         return -1.0;
@@ -2765,14 +2781,6 @@ float readBatteryVoltage() {
     const int numSamples = 10;
     uint32_t adcSum = 0;
     for (int i = 0; i < numSamples; i++) {
-        // On ESP32, analogReadMilliVolts() returns a calibrated millivolt value
-        // using the factory-burned eFuse VREF calibration, while analogRead()
-        // returns raw 12-bit ADC counts (0-4095) whose mapping to voltage is
-        // non-linear and uncalibrated. Using raw counts with a linear scaling
-        // factor produces inaccurate results — especially at voltage extremes —
-        // leading to inflated readings (e.g. always 100% battery).
-        // Reference: Espressif ADC Calibration docs
-        // https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/adc_calibration.html
         #ifdef TARGET_ESP32
         adcSum += analogReadMilliVolts(sensePin);
         #else
@@ -2788,7 +2796,7 @@ float readBatteryVoltage() {
     if (scalingFactor > 0) {
         voltage = (adcAverage * scalingFactor) / (100000.0);
     }
-     return voltage;
+    return voltage;
 }
 
 float readChipTemperature() {
