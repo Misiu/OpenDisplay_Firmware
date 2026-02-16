@@ -1429,13 +1429,15 @@ void initWiFi() {
     writeSerial("SSID: \"" + String(wifiSsid) + "\"");
     String deviceName = "OD" + getChipIdHex();
     WiFi.setAutoReconnect(true);
+    WiFi.setTxPower(WIFI_POWER_15dBm);
     wifiSsid[32] = '\0';
     wifiPassword[32] = '\0';
     writeSerial("Encryption type: 0x" + String(wifiEncryptionType, HEX));
     wifiConnected = false;
     wifiInitialized = true;
     WiFi.begin(wifiSsid, wifiPassword);
-    // Set WiFi TX power: use lower power for battery-powered devices to save energy
+    // Set WiFi TX power after WiFi.begin(): use lower power for battery-powered devices
+    // Non-battery devices keep the 15dBm set above. Battery devices override to 8.5dBm.
     // Ref: https://docs.espressif.com/projects/arduino-esp32/en/latest/api/wifi.html
     if (globalConfig.power_option.power_mode == 1) {
         WiFi.setTxPower(WIFI_POWER_8_5dBm);  // Battery mode: moderate TX power
