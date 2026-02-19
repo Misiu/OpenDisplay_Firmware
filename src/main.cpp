@@ -2569,7 +2569,7 @@ void handleFirmwareVersion(){
     uint8_t response[2 + 1 + 1 + 1 + 40];
     uint16_t offset = 0;
     response[offset++] = 0x00;
-    response[offset++] = 0x43;
+    response[offset++] = RESP_FIRMWARE_VERSION;
     response[offset++] = major;
     response[offset++] = minor;
     response[offset++] = shaLen;
@@ -2578,6 +2578,187 @@ void handleFirmwareVersion(){
     }
     sendResponse(response, offset);
     writeSerial("Firmware version response sent");
+}
+
+void handleEnterDfuMode(){
+    writeSerial("=== ENTER OTA DFU MODE ===");
+    #ifdef TARGET_NRF
+    // Send confirmation response before resetting
+    uint8_t response[] = {0x00, RESP_ENTER_DFU_OTA};
+    sendResponse(response, sizeof(response));
+    delay(500); // Allow BLE response to be transmitted
+
+    // Write OTA DFU magic to GPREGRET register and reset into bootloader
+    // The Adafruit nRF52 bootloader recognizes 0xB1 as the signal to enter OTA DFU mode
+    sd_power_gpregret_clr(0, 0xffffffff);
+    sd_power_gpregret_set(0, 0xB1);
+    writeSerial("Resetting into OTA DFU bootloader...");
+    NVIC_SystemReset();
+    #else
+    writeSerial("OTA DFU mode not supported on this platform via this command");
+    uint8_t response[] = {0xFF, RESP_ENTER_DFU_OTA};
+    sendResponse(response, sizeof(response));
+    #endif
+}
+
+void handleEnterSerialDfuMode(){
+    writeSerial("=== ENTER SERIAL/USB DFU MODE ===");
+    #ifdef TARGET_NRF
+    // Send confirmation response before resetting
+    uint8_t response[] = {0x00, RESP_ENTER_DFU_SERIAL};
+    sendResponse(response, sizeof(response));
+    delay(500); // Allow BLE response to be transmitted
+
+    // Write Serial DFU magic to GPREGRET register and reset into bootloader
+    // The Adafruit nRF52 bootloader recognizes 0x4E as the signal to enter USB/Serial DFU mode
+    sd_power_gpregret_clr(0, 0xffffffff);
+    sd_power_gpregret_set(0, 0x4E);
+    writeSerial("Resetting into Serial/USB DFU bootloader...");
+    NVIC_SystemReset();
+    #else
+    writeSerial("Serial DFU mode not supported on this platform via this command");
+    uint8_t response[] = {0xFF, RESP_ENTER_DFU_SERIAL};
+    sendResponse(response, sizeof(response));
+    #endif
+}
+
+void handleOtaStart(uint8_t* data, uint16_t len){
+    writeSerial("=== BLE OTA START ===");
+    #ifdef TARGET_ESP32
+    // Payload: 4 bytes little-endian firmware size
+    if (len < 4) {
+        writeSerial("ERROR: OTA start payload too short (need 4 bytes for size)");
+        uint8_t response[] = {0xFF, RESP_OTA_START};
+        sendResponse(response, sizeof(response));
+        return;
+    }
+
+    if (otaActive) {
+        writeSerial("WARNING: OTA already active, aborting previous update");
+        Update.abort();
+        otaActive = false;
+    }
+
+    uint32_t firmwareSize = (uint32_t)data[0] | ((uint32_t)data[1] << 8) |
+                            ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+
+    writeSerial("OTA firmware size: " + String(firmwareSize) + " bytes");
+
+    if (firmwareSize == 0) {
+        writeSerial("ERROR: Firmware size is zero");
+        uint8_t response[] = {0xFF, RESP_OTA_START};
+        sendResponse(response, sizeof(response));
+        return;
+    }
+
+    if (!Update.begin(firmwareSize, U_FLASH)) {
+        writeSerial("ERROR: Update.begin() failed - " + String(Update.errorString()));
+        uint8_t response[] = {0xFF, RESP_OTA_START};
+        sendResponse(response, sizeof(response));
+        return;
+    }
+
+    otaActive = true;
+    otaTotalSize = firmwareSize;
+    otaBytesReceived = 0;
+    otaLastLoggedPct = 0;
+    writeSerial("OTA update initialized, ready to receive firmware data");
+
+    uint8_t response[] = {0x00, RESP_OTA_START};
+    sendResponse(response, sizeof(response));
+    #else
+    writeSerial("BLE OTA not supported on this platform");
+    uint8_t response[] = {0xFF, RESP_OTA_START};
+    sendResponse(response, sizeof(response));
+    #endif
+}
+
+void handleOtaData(uint8_t* data, uint16_t len){
+    #ifdef TARGET_ESP32
+    if (!otaActive) {
+        writeSerial("ERROR: OTA not active, send OTA Start (0x0046) first");
+        uint8_t response[] = {0xFF, RESP_OTA_DATA};
+        sendResponse(response, sizeof(response));
+        return;
+    }
+
+    if (len == 0) {
+        writeSerial("ERROR: OTA data chunk is empty");
+        uint8_t response[] = {0xFF, RESP_OTA_DATA};
+        sendResponse(response, sizeof(response));
+        return;
+    }
+
+    size_t written = Update.write(data, len);
+    if (written != len) {
+        writeSerial("ERROR: Update.write() failed - wrote " + String(written) + "/" + String(len) + " - " + String(Update.errorString()));
+        Update.abort();
+        otaActive = false;
+        uint8_t response[] = {0xFF, RESP_OTA_DATA};
+        sendResponse(response, sizeof(response));
+        return;
+    }
+
+    otaBytesReceived += len;
+
+    // Log progress every ~10%
+    if (otaTotalSize > 0) {
+        uint8_t pct = (uint8_t)((otaBytesReceived * 100) / otaTotalSize);
+        if (pct / 10 != otaLastLoggedPct / 10) {
+            writeSerial("OTA progress: " + String(otaBytesReceived) + "/" + String(otaTotalSize) + " (" + String(pct) + "%)");
+            otaLastLoggedPct = pct;
+        }
+    }
+
+    uint8_t response[] = {0x00, RESP_OTA_DATA};
+    sendResponse(response, sizeof(response));
+    #else
+    writeSerial("BLE OTA not supported on this platform");
+    uint8_t response[] = {0xFF, RESP_OTA_DATA};
+    sendResponse(response, sizeof(response));
+    #endif
+}
+
+void handleOtaEnd(){
+    writeSerial("=== BLE OTA END ===");
+    #ifdef TARGET_ESP32
+    if (!otaActive) {
+        writeSerial("ERROR: OTA not active");
+        uint8_t response[] = {0xFF, RESP_OTA_END};
+        sendResponse(response, sizeof(response));
+        return;
+    }
+
+    writeSerial("OTA received " + String(otaBytesReceived) + "/" + String(otaTotalSize) + " bytes");
+
+    if (!Update.end(true)) { // true = set size to what was written
+        writeSerial("ERROR: Update.end() failed - " + String(Update.errorString()));
+        otaActive = false;
+        uint8_t response[] = {0xFF, RESP_OTA_END};
+        sendResponse(response, sizeof(response));
+        return;
+    }
+
+    if (!Update.isFinished()) {
+        writeSerial("ERROR: Update not finished");
+        otaActive = false;
+        uint8_t response[] = {0xFF, RESP_OTA_END};
+        sendResponse(response, sizeof(response));
+        return;
+    }
+
+    otaActive = false;
+    writeSerial("OTA update successful! Rebooting...");
+
+    uint8_t response[] = {0x00, RESP_OTA_END};
+    sendResponse(response, sizeof(response));
+    delay(500); // Allow BLE response to be transmitted
+    esp_restart();
+    #else
+    writeSerial("BLE OTA not supported on this platform");
+    uint8_t response[] = {0xFF, RESP_OTA_END};
+    sendResponse(response, sizeof(response));
+    #endif
 }
 
 void handleWriteConfig(uint8_t* data, uint16_t len){
@@ -3847,6 +4028,25 @@ void imageDataWritten(BLEConnHandle conn_hdl, BLECharPtr chr, uint8_t* data, uin
         case 0x0043: // Firmware Version command
             writeSerial("=== FIRMWARE VERSION COMMAND (0x0043) ===");
             handleFirmwareVersion();
+            break;
+        case 0x0044: // Enter OTA DFU Mode command
+            writeSerial("=== ENTER OTA DFU MODE COMMAND (0x0044) ===");
+            handleEnterDfuMode();
+            break;
+        case 0x0045: // Enter Serial/USB DFU Mode command
+            writeSerial("=== ENTER SERIAL/USB DFU MODE COMMAND (0x0045) ===");
+            handleEnterSerialDfuMode();
+            break;
+        case 0x0046: // BLE OTA Start command
+            writeSerial("=== BLE OTA START COMMAND (0x0046) ===");
+            handleOtaStart(data + 2, len - 2);
+            break;
+        case 0x0047: // BLE OTA Data command
+            handleOtaData(data + 2, len - 2);
+            break;
+        case 0x0048: // BLE OTA End command
+            writeSerial("=== BLE OTA END COMMAND (0x0048) ===");
+            handleOtaEnd();
             break;
         case 0x0070: // Direct Write Start command
             writeSerial("=== DIRECT WRITE START COMMAND (0x0070) ===");
